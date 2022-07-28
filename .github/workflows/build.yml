@@ -1,0 +1,53 @@
+name: build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      TZ: Asia/Shanghai
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
+      - name: Initialize environment
+        run: |
+          sudo apt-get clean
+          sudo apt-get update
+          sudo apt-get install -y git g++ apt-utils autoconf automake build-essential libcurl4-openssl-dev libgeoip-dev liblmdb-dev libpcre++-dev libtool libxml2-dev libyajl-dev pkgconf wget zlib1g-dev
+
+      - name: Clone Source Code
+        run: |
+          git clone -b $(cat VERSION) https://github.com/SpiderLabs/ModSecurity.git
+          cd ModSecurity
+          git submodule init
+          git submodule update
+
+      - name: Compile
+        id: compile
+        run: |
+          cd ModSecurity
+          sh build.sh
+          ./configure --prefix=/usr/local/modsecurity
+          sudo make -j$(nproc)
+          sudo make install
+          cd ..
+          sudo cp -r /usr/local/modsecurity ./modsecurity
+          tar -zcvf modsecurity.tar.gz ./modsecurity
+          echo "::set-output name=status::success"
+          echo "::set-output name=release_tag::$(cat VERSION)"
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: steps.compile.outputs.status == 'success'
+        with:
+          token: ${{ secrets.GH_PAT }}
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          files: modsecurity.tar.gz
